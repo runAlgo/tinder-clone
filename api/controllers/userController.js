@@ -8,7 +8,11 @@ export const updateProfile = async (req, res) => {
 		const { image, ...otherData } = req.body;
 
 		let updatedData = otherData;
+		const userId = req.user._id;
 
+		if(!image) {
+			return res.status(400).json({message: "Profile pic is required"});
+		}
 		if (image) {
 			// base64 format
 			if (image.startsWith("data:image")) {
@@ -25,8 +29,7 @@ export const updateProfile = async (req, res) => {
 				}
 			}
 		}
-
-		const updatedUser = await User.findByIdAndUpdate(req.user.id, updatedData, { new: true });
+		const updatedUser = await User.findByIdAndUpdate(userId, updatedData, { new: true });
 
 		res.status(200).json({
 			success: true,

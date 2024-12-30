@@ -1,102 +1,138 @@
 import User from "../models/User.model.js";
 import jwt from "jsonwebtoken";
 
+// Generate JWT token
 const signToken = (id) => {
-	// jwt token
-	return jwt.sign({ id }, process.env.JWT_SECRET, {
-		expiresIn: "7d",
-	});
+  return jwt.sign({ id }, process.env.JWT_SECRET, {
+    expiresIn: "7d",
+  });
 };
 
+// Signup Controller
 export const signup = async (req, res) => {
-	const { name, email, password, age, gender, genderPreference } = req.body;
-	try {
-		if (!name || !email || !password || !age || !gender || !genderPreference) {
-			return res.status(400).json({
-				success: false,
-				message: "All fields are required",
-			});
-		}
+  const { name, email, password, age, gender, genderPreference } = req.body;
+  try {
+    // Validation - Check required fields
+    if (!name || !email || !password || !age || !gender || !genderPreference) {
+      return res.status(400).json({
+        success: false,
+        message: "All fields are required",
+      });
+    }
 
-		if (age < 18) {
-			return res.status(400).json({
-				success: false,
-				message: "You must at lest 18 years old",
-			});
-		}
+    // Age validation
+    if (age < 18) {
+      return res.status(400).json({
+        success: false,
+        message: "You must be at least 18 years old",
+      });
+    }
 
-		if (password.length < 6) {
-			return res.status(400).json({
-				success: false,
-				message: "Password must be at least 6 characters",
-			});
-		}
+    // Password length validation
+    if (password.length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: "Password must be at least 6 characters",
+      });
+    }
 
-		const newUser = await User.create({
-			name,
-			email,
-			password,
-			age,
-			gender,
-			genderPreference,
-		});
+    // Check if user already exists
+    const user = await User.findOne({ email });
+    if (user) {
+      return res.status(400).json({ message: "Email already exists" });
+    }
 
-		const token = signToken(newUser._id);
+    // Create new user (password will be hashed automatically by pre-save hook)
+    const newUser = new User({
+      name,
+      email,
+      password, // Use plain password, hashing will be handled in the pre-save hook
+      age,
+      gender,
+      genderPreference,
+    });
 
-		res.cookie("jwt", token, {
-			maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days in milliseconds
-			httpOnly: true, // prevents XSS attacks
-			sameSite: "strict", // prevents CSRF attacks
-			secure: process.env.NODE_ENV === "production",
-		});
+    // Save user and generate token
+    await newUser.save();
+    const token = signToken(newUser._id);
 
-		res.status(201).json({
-			success: true,
-			user: newUser,
-		});
-	} catch (error) {
-		console.log("Error in signup controller:", error);
-		res.status(500).json({ success: false, message: "Server error" });
-	}
+    // Set cookie with JWT
+    res.cookie("jwt", token, {
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+      httpOnly: true,
+      sameSite: "strict",
+      secure: process.env.NODE_ENV === "production",
+    });
+
+    res.status(201).json({
+      success: true,
+      user: {
+        _id: newUser._id,
+        name: newUser.name,
+        email: newUser.email,
+        age: newUser.age,
+        gender: newUser.gender,
+        genderPreference: newUser.genderPreference,
+      },
+    });
+  } catch (error) {
+    console.error("Error in signup controller:", error.message);
+    res.status(500).json({ success: false, message: "Internal Server error" });
+  }
 };
+
+// Login Controller
 export const login = async (req, res) => {
-	const { email, password } = req.body;
-	try {
-		if (!email || !password) {
-			return res.status(400).json({
-				success: false,
-				message: "All fields are required",
-			});
-		}
+  const { email, password } = req.body;
+  try {
+    // Find user by email
+    const user = await User.findOne({ email });
 
-		const user = await User.findOne({ email }).select("+password");
+    // If user not found
+    if (!user) {
+      return res.status(400).json({ message: "Invalid email" });
+    }
 
-		if (!user || !(await user.matchPassword(password))) {
-			return res.status(401).json({
-				success: false,
-				message: "Invalid email or password",
-			});
-		}
+    // Check password using matchPassword method
+    const isPasswordCorrect = await user.matchPassword(password);
+    if (!isPasswordCorrect) {
+      return res.status(400).json({ message: "Invalid credentials" });
+    }
 
-		const token = signToken(user._id);
+    // Generate token and set cookie
+    const token = signToken(user._id);
+    res.cookie("jwt", token, {
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+      httpOnly: true,
+      sameSite: "strict",
+      secure: process.env.NODE_ENV === "production",
+    });
 
-		res.cookie("jwt", token, {
-			maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days in milliseconds
-			httpOnly: true, // prevents XSS attacks
-			sameSite: "strict", // prevents CSRF attacks
-			secure: process.env.NODE_ENV === "production",
-		});
-
-		res.status(200).json({
-			success: true,
-			user,
-		});
-	} catch (error) {
-		console.log("Error in login controller:", error);
-		res.status(500).json({ success: false, message: "Server error" });
-	}
+    // Return user data
+    res.status(200).json({
+      success: true,
+      user: {
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        age: user.age,
+        gender: user.gender,
+        genderPreference: user.genderPreference,
+      },
+    });
+  } catch (error) {
+    console.error("Error in login controller:", error.message);
+    res.status(500).json({ success: false, message: "Internal Server error" });
+  }
 };
-export const logout = async (req, res) => {
-	res.clearCookie("jwt");
-	res.status(200).json({ success: true, message: "Logged out successfully" });
+
+// Logout Controller
+export const logout = (req, res) => {
+  try {
+    res.cookie("jwt", "", { maxAge: 0 }); // Clear JWT cookie
+    res.status(200).json({ message: "Logged out successfully" });
+  } catch (error) {
+    console.error("Error in logout controller", error.message);
+    res.status(500).json({ message: "Internal Server Error" });
+  }
 };
